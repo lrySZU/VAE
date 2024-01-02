@@ -4,6 +4,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import torch.nn as nn
 import torch.nn.functional as F
+import matplotlib.pyplot as plt
 
 
 def split_data(data, part1, part2):
@@ -202,7 +203,7 @@ def mytest(train_data, test_data, vae, test_mat, train_mat):
     flag = 0  # test mode
     # out is a tensor, need to be converted into ndarray
     out, mu, logger = vae(input_data, flag)
-    top_k = 10
+    top_k = 20
 
     # no grad -> cpu -> numpy
     out = out.detach()
@@ -233,12 +234,15 @@ def mytest(train_data, test_data, vae, test_mat, train_mat):
     recall = rec_k / len(test_user)
     precision = pre_k / len(test_user)
     print('recall:{}, precision:{}'.format(recall, precision))
+    return recall, precision
 
 
 def train(movie_num, hidden_num, dataloader, train_data, test_data, test_mat, train_mat):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     vae = VaE(movie_num, hidden_num).to(device)
-    lr = 1e-3
+    lr = 1e-4
+    recall_list = []
+    precision_list = []
     opt = torch.optim.Adam(vae.parameters(), lr=lr)
     iters = 100
     for i in range(1, iters + 1):
@@ -252,7 +256,22 @@ def train(movie_num, hidden_num, dataloader, train_data, test_data, test_mat, tr
             opt.step()
         if i % 10 == 0:
             print(f'iter = {i}')
-            mytest(train_data, test_data, vae, test_mat, train_mat)
+            recall, precision = mytest(train_data, test_data, vae, test_mat, train_mat)
+            recall_list.append(recall)
+            precision_list.append(precision)
+    return recall_list, precision_list, len(recall_list)
+
+
+def data_visualization(recall_list, precision_list, length):
+    epochs = [i for i in range(1, length + 1)]
+    fig, ax = plt.subplots()
+    plt.plot(epochs, recall_list, color='r', label='recall@20')
+    plt.plot(epochs, precision_list, color='b', label='precision@20')
+    plt.legend()
+    plt.xlabel("iterate itme")
+    plt.ylabel('recall@20 and precision@20')
+    plt.title('recall@20 and precision@20 of VAE')
+    plt.show()
 
 
 if __name__ == '__main__':
@@ -270,4 +289,8 @@ if __name__ == '__main__':
     dataloader = DataLoader(dataset=dataset, batch_size=100, shuffle=True)
     print('Data loaded')
 
-    train(movie_num, hidden_num, dataloader, train_data, test_data, test_mat, train_mat)
+    recall_list, precision_list, length = train(movie_num, hidden_num, dataloader,
+                                                train_data, test_data, test_mat, train_mat)
+
+    data_visualization(recall_list, precision_list, length)
+
