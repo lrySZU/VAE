@@ -5,6 +5,7 @@ from torch.utils.data import Dataset, DataLoader
 import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+from sklearn import preprocessing
 
 
 def split_data(data, part1, part2):
@@ -43,27 +44,31 @@ def filter_data(train_data, valid_data, test_data):
     :param test_data:
     :return: valid_data and test_data after filtering
     """
-    train_movie = train_data['movie_id'].drop_duplicates().tolist()
-    valid_movie = valid_data['movie_id'].drop_duplicates().tolist()
-    test_movie = test_data['movie_id'].drop_duplicates().tolist()
+    train_movie = train_data['movieId'].drop_duplicates().tolist()
+    valid_movie = valid_data['movieId'].drop_duplicates().tolist()
+    test_movie = test_data['movieId'].drop_duplicates().tolist()
 
     valid_movie = list(set(valid_movie).intersection(set(train_movie)))
     test_movie = list(set(test_movie).intersection(set(train_movie)))
 
     # isin: Simultaneously check if the data is equal to multiple values (list / dict / dataframe)
-    valid_data = valid_data[valid_data.movie_id.isin(valid_movie)]
-    test_data = test_data[test_data.movie_id.isin(test_movie)]
+    valid_data = valid_data[valid_data.movieId.isin(valid_movie)]
+    test_data = test_data[test_data.movieId.isin(test_movie)]
 
     return valid_data, test_data
 
 
 def read_data(root1):
-    r_cols = ['user_id', 'movie_id', 'rating', 'time']
-    ratings_base = pd.read_csv(root1, sep="::", names=['user_id', 'movie_id', 'rating', 'time'], engine='python')
-
-    ratings_base.drop(['time'], axis=1, inplace=True)  # only when inplace is true do an operation
+    ratings_base = pd.read_csv(root1)
+    ratings_base.drop(columns=['timestamp'])  # only when inplace is true do an operation
 
     ratings_base = ratings_base[(ratings_base['rating'] >= 1)]
+    lbl_user = preprocessing.LabelEncoder()
+    lbl_movie = preprocessing.LabelEncoder()
+    ratings_base.userId = lbl_user.fit_transform(np.array(ratings_base.userId))
+    ratings_base.movieId = lbl_movie.fit_transform(np.array(ratings_base.movieId))
+    print(f'rating_df.userId.max()={ratings_base.userId.max()}')  # users 0 ~ 609
+    print(f'rating_df.movieId.max()={ratings_base.movieId.max()}')  # movies 0 ~ 9723
 
     train_data, valid_data, test_data = split_data(ratings_base, 0.6, 0.2)
     valid_data, test_data = filter_data(train_data, valid_data, test_data)
@@ -84,24 +89,25 @@ def ranking_matrix(train_data, valid_data, test_data, user_num, item_num):
     valid_mat = np.zeros((user_num, item_num))
     test_mat = np.zeros((user_num, item_num))
 
-    train_user = train_data['user_id'].drop_duplicates().tolist()
-    valid_user = valid_data['user_id'].drop_duplicates().tolist()
-    test_user = test_data['user_id'].drop_duplicates().tolist()
+    train_user = train_data['userId'].drop_duplicates().tolist()
+    valid_user = valid_data['userId'].drop_duplicates().tolist()
+    test_user = test_data['userId'].drop_duplicates().tolist()
 
     # hashset for user -> movies
     train_movie = {}
     for user in train_user:
-        train_movie[user] = train_data.loc[train_data['user_id'] == user]['movie_id'].drop_duplicates().tolist()
+        train_movie[user] = train_data.loc[train_data['userId'] == user]['movieId'].drop_duplicates().tolist()
     valid_movie = {}
     for user in valid_user:
-        valid_movie[user] = valid_data.loc[valid_data['user_id'] == user]['movie_id'].drop_duplicates().tolist()
+        valid_movie[user] = valid_data.loc[valid_data['userId'] == user]['movieId'].drop_duplicates().tolist()
     test_movie = {}
     for user in test_user:
-        test_movie[user] = test_data.loc[test_data['user_id'] == user]['movie_id'].drop_duplicates().tolist()
+        test_movie[user] = test_data.loc[test_data['userId'] == user]['movieId'].drop_duplicates().tolist()
 
     # matrix
     for user in train_user:
         for movie in train_movie[user]:
+            # print(f'user={user}\tmovie={movie}')
             train_mat[user][movie] = 1
 
     for user in valid_user:
@@ -190,13 +196,13 @@ def mytest(train_data, test_data, vae, test_mat, train_mat):
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     pre_k, rec_k = 0, 0
 
-    test_user = test_data['user_id'].drop_duplicates().tolist()
-    train_user = train_data['user_id'].drop_duplicates().tolist()
+    test_user = test_data['userId'].drop_duplicates().tolist()
+    train_user = train_data['userId'].drop_duplicates().tolist()
     train_movie = {}
 
     for user in train_user:
-        train_movie[user] = train_data.loc[train_data['user_id'] == user][
-            "movie_id"].drop_duplicates().tolist()
+        train_movie[user] = train_data.loc[train_data['userId'] == user][
+            "movieId"].drop_duplicates().tolist()
 
     # use list to slice np array, convert it into tensor
     input_data = torch.tensor(train_mat[test_user], dtype=torch.float).to(device)
@@ -215,8 +221,8 @@ def mytest(train_data, test_data, vae, test_mat, train_mat):
 
     for i, u in enumerate(test_user):
         hit = 0
-        test_list = test_data.loc[test_data['user_id'] == u][
-            "movie_id"].drop_duplicates().tolist()
+        test_list = test_data.loc[test_data['userId'] == u][
+            "movieId"].drop_duplicates().tolist()
 
         recommend = []
         for movie in tmp_list[i]:
@@ -244,7 +250,7 @@ def train(movie_num, hidden_num, dataloader, train_data, test_data, test_mat, tr
     recall_list = []
     precision_list = []
     opt = torch.optim.Adam(vae.parameters(), lr=lr)
-    iters = 100
+    iters = 200
     for i in range(1, iters + 1):
         for x, user in dataloader:
             x = x.to(device)
@@ -263,7 +269,7 @@ def train(movie_num, hidden_num, dataloader, train_data, test_data, test_mat, tr
 
 
 def data_visualization(recall_list, precision_list, length):
-    epochs = [i for i in range(1, length + 1)]
+    epochs = [10 * i for i in range(1, length + 1)]
     fig, ax = plt.subplots()
     plt.plot(epochs, recall_list, color='r', label='recall@20')
     plt.plot(epochs, precision_list, color='b', label='precision@20')
@@ -275,12 +281,12 @@ def data_visualization(recall_list, precision_list, length):
 
 
 if __name__ == '__main__':
-    root1 = 'ml-1m/ratings.txt'
+    root1 = 'ml-latest-small/ratings.csv'
     train_data, valid_data, test_data = read_data(root1)
     print('Reading data is complete')
 
-    user_num = 6041
-    movie_num = 4000
+    user_num = 610
+    movie_num = 9627
     hidden_num = 200
 
     train_mat, valid_mat, test_mat = ranking_matrix(train_data, valid_data, test_data, user_num, movie_num)
